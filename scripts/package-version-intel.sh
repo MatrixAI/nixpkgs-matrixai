@@ -259,44 +259,7 @@ resolve_candidate_ref() {
   die "unable to resolve candidate ref in nixpkgs remote: $ref"
 }
 
-eval_meta_current() {
-  local attr_json="$1"
-
-  nix eval --json --impure --expr "
-    let
-      f = builtins.getFlake \"path:${ROOT_DIR}\";
-      pkgs = f.lib.mkPkgs {
-        system = \"${SYSTEM}\";
-        config.allowUnfree = true;
-      };
-      attrPath = builtins.fromJSON ''${attr_json}'';
-      resolvePath = path: attrs:
-        builtins.foldl'
-          (state: key:
-            if !state.ok then state
-            else if builtins.isAttrs state.value && builtins.hasAttr key state.value then {
-              ok = true;
-              value = builtins.getAttr key state.value;
-            } else {
-              ok = false;
-              value = null;
-            })
-          { ok = true; value = attrs; }
-          path;
-      resolved = resolvePath attrPath pkgs;
-      pkg = if resolved.ok then resolved.value else null;
-      isAttrs = builtins.isAttrs pkg;
-    in
-      {
-        present = resolved.ok;
-        version = if isAttrs && (pkg ? version) then pkg.version else null;
-        pname = if isAttrs && (pkg ? pname) then pkg.pname else null;
-        name = if isAttrs && (pkg ? name) then pkg.name else null;
-      }
-  " 2>/dev/null
-}
-
-eval_meta_candidate() {
+eval_meta_at_sha() {
   local attr_json="$1"
   local sha="$2"
 
@@ -455,10 +418,11 @@ cmd_current() {
   local attr_json current_meta current_rev
 
   attr_json="$(attr_path_json "$attr_path")"
-  current_meta="$(eval_meta_current "$attr_json" || true)"
-  [[ -n "$current_meta" ]] || die "failed to evaluate current metadata for attr path: $attr_path"
-
   current_rev="$(lock_nixpkgs_rev || true)"
+  [[ "$current_rev" =~ ^[0-9a-f]{40}$ ]] || die "failed to resolve current nixpkgs rev from flake.lock"
+
+  current_meta="$(eval_meta_at_sha "$attr_json" "$current_rev" || true)"
+  [[ -n "$current_meta" ]] || die "failed to evaluate current metadata for attr path: $attr_path"
 
   echo "package version intel"
   echo "  mode:        current"
@@ -475,17 +439,18 @@ cmd_compare() {
   local candidate_meta current_version candidate_version status
 
   attr_json="$(attr_path_json "$attr_path")"
-  current_meta="$(eval_meta_current "$attr_json" || true)"
-  [[ -n "$current_meta" ]] || die "failed to evaluate current metadata for attr path: $attr_path"
-
   current_rev="$(lock_nixpkgs_rev || true)"
+  [[ "$current_rev" =~ ^[0-9a-f]{40}$ ]] || die "failed to resolve current nixpkgs rev from flake.lock"
+
+  current_meta="$(eval_meta_at_sha "$attr_json" "$current_rev" || true)"
+  [[ -n "$current_meta" ]] || die "failed to evaluate current metadata for attr path: $attr_path"
 
   candidate_tuple="$(resolve_candidate_ref "$CANDIDATE_REF")"
   candidate_ref_used="$(printf '%s' "$candidate_tuple" | awk -F'|' '{print $1}')"
   candidate_sha="$(printf '%s' "$candidate_tuple" | awk -F'|' '{print $2}')"
   candidate_source="$(printf '%s' "$candidate_tuple" | awk -F'|' '{print $3}')"
 
-  candidate_meta="$(eval_meta_candidate "$attr_json" "$candidate_sha" || true)"
+  candidate_meta="$(eval_meta_at_sha "$attr_json" "$candidate_sha" || true)"
   [[ -n "$candidate_meta" ]] || die "failed to evaluate candidate metadata for attr path: $attr_path at $candidate_sha"
 
   current_version="$(jq -r '.version // "unknown"' <<< "$current_meta")"

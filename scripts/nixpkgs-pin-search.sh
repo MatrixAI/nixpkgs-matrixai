@@ -269,6 +269,11 @@ init_or_update_git_cache() {
     git -C "$cache_repo" remote add origin "$NIXPKGS_REMOTE_URL" >/dev/null 2>&1 || die "failed to add nixpkgs remote"
   fi
 
+  git -C "$cache_repo" config remote.origin.promisor true \
+    || die "failed to configure nixpkgs cache as a partial clone"
+  git -C "$cache_repo" config remote.origin.partialclonefilter tree:0 \
+    || die "failed to configure nixpkgs cache tree filter"
+
   printf '%s\n' "$cache_repo"
 }
 
@@ -286,7 +291,7 @@ fetch_search_refs() {
   local origin="$2"
 
   log_info "fetching nixpkgs refs for search"
-  git -C "$cache_repo" fetch --no-tags origin \
+  git -C "$cache_repo" fetch --filter=tree:0 --no-tags origin \
     "$origin" \
     "+${TRACKING_REF}:${NIXPKGS_CACHE_REF}" >/dev/null 2>&1 \
     || die "failed to fetch origin and tracking ref from nixpkgs"
@@ -326,6 +331,23 @@ append_candidate() {
   CANDIDATE_DIRECTIONS+=("$direction")
 }
 
+append_candidate_if_missing() {
+  local sha="$1"
+  local offset="$2"
+  local direction="$3"
+  local existing_offset
+
+  CANDIDATE_WAS_APPENDED=0
+  for existing_offset in "${CANDIDATE_OFFSETS[@]}"; do
+    if [[ "$existing_offset" == "$offset" ]]; then
+      return 0
+    fi
+  done
+
+  append_candidate "$sha" "$offset" "$direction"
+  CANDIDATE_WAS_APPENDED=1
+}
+
 candidate_index_for_offset() {
   local offset="$1"
   local i index sha direction
@@ -359,7 +381,7 @@ candidate_index_for_offset() {
 
 build_candidate_window() {
   local origin_index="$1"
-  local distance index
+  local distance index forward_limit backward_limit
 
   CANDIDATES=()
   CANDIDATE_OFFSETS=()
@@ -400,6 +422,30 @@ build_candidate_window() {
       done
       ;;
   esac
+
+  if [[ "$DIRECTION" == "forward" || "$DIRECTION" == "both" ]]; then
+    forward_limit="$origin_index"
+    if (( forward_limit > SPAN )); then
+      forward_limit="$SPAN"
+    fi
+    if (( forward_limit > 0 )); then
+      index=$((origin_index - forward_limit))
+      append_candidate_if_missing "${TRACKING_CHAIN[$index]}" "$forward_limit" forward
+      FORWARD_CANDIDATE_COUNT=$((FORWARD_CANDIDATE_COUNT + CANDIDATE_WAS_APPENDED))
+    fi
+  fi
+
+  if [[ "$DIRECTION" == "backward" || "$DIRECTION" == "both" ]]; then
+    backward_limit=$((${#TRACKING_CHAIN[@]} - origin_index - 1))
+    if (( backward_limit > SPAN )); then
+      backward_limit="$SPAN"
+    fi
+    if (( backward_limit > 0 )); then
+      index=$((origin_index + backward_limit))
+      append_candidate_if_missing "${TRACKING_CHAIN[$index]}" "$((-backward_limit))" backward
+      BACKWARD_CANDIDATE_COUNT=$((BACKWARD_CANDIDATE_COUNT + CANDIDATE_WAS_APPENDED))
+    fi
+  fi
 
   [[ ${#CANDIDATES[@]} -gt 0 ]] || die "failed to build candidate window from origin commit"
 }
