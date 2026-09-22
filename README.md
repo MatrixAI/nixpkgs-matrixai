@@ -231,6 +231,113 @@ Use:
 
 `update` rewrites the managed nixpkgs block in `flake.nix`, refreshes `flake.lock`, and verifies rev consistency.
 
+When a candidate pin breaks an upstream package you care about, use the pin
+search helper before deciding policy. A candidate succeeds when all requested
+conditions pass. Build conditions build one or more derivations, assert
+conditions must evaluate to `true`, and eval conditions must evaluate
+successfully.
+
+Put reusable conditions in a condition file that receives the candidate upstream
+nixpkgs package set as `pkgs` and returns a list of condition attrsets:
+
+```nix
+{ pkgs }:
+
+[
+  { kind = "build"; expr = pkgs.binwalk; }
+  { kind = "build"; expr = pkgs.radicle; }
+  { kind = "assert"; expr = pkgs.lib.versionAtLeast pkgs.radicle.version "1.9.1"; }
+  { kind = "eval"; expr = pkgs.radicle.version; }
+]
+```
+
+Then search from the current managed nixpkgs pin for the closest candidate where
+every condition passes:
+
+```sh
+./scripts/nixpkgs-pin-search.sh ./checks/pin-conditions.nix
+```
+
+For quick one-off probes, pass repeated command-line conditions with `pkgs` in
+scope. These lower to the same internal condition schema as condition files:
+
+```sh
+./scripts/nixpkgs-pin-search.sh --build 'pkgs.binwalk' --build 'pkgs.radicle'
+```
+
+For version or metadata searches, use `--assert` or `--eval`:
+
+```sh
+./scripts/nixpkgs-pin-search.sh --assert 'pkgs.lib.versionAtLeast pkgs.radicle.version "1.9.1"'
+```
+
+Combine condition kinds when both metadata and builds matter:
+
+```sh
+./scripts/nixpkgs-pin-search.sh --build 'pkgs.radicle' --assert 'pkgs.lib.versionAtLeast pkgs.radicle.version "1.9.1"'
+```
+
+The condition kinds are:
+
+- `build`: expression must evaluate to a derivation, list of derivations, or
+  attrset of derivations; all resulting derivations are built.
+- `assert`: expression must evaluate to boolean `true`.
+- `eval`: expression must evaluate successfully without being selected as a
+  package build target.
+
+Conceptually, the helper is like `git bisect` for source-code regressions, but
+the search space is upstream nixpkgs commits and the pass/fail test is your Nix
+condition set. This lets maintainers answer questions such as "which nearby
+nixpkgs commit still builds `pkgs.binwalk`?" or "which nearby commit first has a
+package version satisfying this predicate?" before deciding whether to accept a
+pin, hold a pin, or add a local override.
+
+Use `--direction backward`, `--direction forward`, or `--direction both` when
+you want to constrain the search direction from the origin commit. The default
+is `both`, which samples around the origin and reports the first sampled
+candidate where all conditions pass. The search space is defined by three
+separate choices: the upstream remote where nixpkgs commits are fetched from,
+the traversal branch whose commit steps are counted, and the origin commit where
+the search starts. By default these are NixOS/nixpkgs,
+`refs/heads/nixos-unstable`, and the current managed pin. All direction modes
+use the same exponential fuzzy sampling strategy:
+
+- `--direction both`: origin, +1, -1, +2, -2, +4, -4, and so on.
+- `--direction backward`: origin, -1, -2, -4, -8, and so on.
+- `--direction forward`: origin, +1, +2, +4, +8, and so on.
+
+This keeps expensive package probes practical. A sampled pass is evidence for a
+usable candidate, not proof of the nearest possible passing commit. By default,
+the helper uses `--refine closest`: it bisects the sampled fail/pass bracket until
+the remaining bracket is small, then exact-scans the final tail. The default
+exact tail threshold is 16 commits. Use `--refine none` to keep the sampled
+result only, `--refine bisect` to stop after monotonic boundary refinement, or
+`--refine exact` to linearly scan the whole sampled bracket.
+
+Offsets are tracking-branch steps from the origin on the selected traversal
+branch. For example, offset `-119` means 119 previous tracking-branch steps
+before the origin pin, and offset `+12` means 12 next tracking-branch steps after
+the origin pin. The same commit object can appear on multiple branches, so an
+offset is only meaningful with the selected traversal branch. The run report
+prints bracket sizes while refining so you can see the search space shrink.
+
+If the origin is already the traversal branch head, the forward side is empty,
+so a both-direction fuzzy scan can only probe the origin and older commits.
+
+The helper is non-mutating. It prints the search strategy, a compact sample trace,
+stores logs under `tmp/nixpkgs-pin-search`, and prints the
+`./scripts/nixpkgs-pin-policy.sh update <commit-sha>` command to run if you
+accept the selected candidate. It uses the local nixpkgs Git cache under
+`tmp/git-cache/nixpkgs.repo` so repeated candidate probes can walk and evaluate
+cached Git history instead of refetching the same commits through the GitHub
+tarball path. Defaults are intentionally simple: current managed pin as origin,
+NixOS/nixpkgs as upstream remote, `refs/heads/nixos-unstable` as traversal
+branch, both-direction search, closest
+refinement, a 16-commit exact tail threshold, and a 256-commit span. Use
+`--origin <commit-sha>`, `--direction <backward|forward|both>`,
+`--refine <none|bisect|exact|closest>`, `--exact-threshold <count>`, or
+`--span <count>` only when the default search window is not enough.
+
 #### External flake pin baseline
 
 External `builtins.getFlake` usage is allowlisted and enforced by `checks.${system}.policy-pin`.
