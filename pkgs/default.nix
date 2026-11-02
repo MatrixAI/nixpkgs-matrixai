@@ -3,6 +3,7 @@
 let
   registry = {
     topLevel = {
+      matrixai-lint = ./top-level/matrixai-lint.nix;
       matrixai-public-hello = ./top-level/matrixai-public-hello.nix;
       polykey-cli = ./top-level/polykey-cli.nix;
       structured-madr = ./top-level/structured-madr;
