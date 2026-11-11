@@ -3,6 +3,6 @@
 let
   system = stdenv.hostPlatform.system;
   matrixai-lint-flake = builtins.getFlake
-    "github:MatrixAI/js-lint/f2a3ef1be411cedc47794577156f007292eec87a";
+    "github:MatrixAI/js-lint/edfac397ab407c71306b372eae863b9c8dd10fb7";
 in
 matrixai-lint-flake.packages.${system}.matrixai-lint
