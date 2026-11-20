@@ -60,4 +60,6 @@ lib.makeScope lib.callPackageWith (self: {
   mkPkgs = self.callLib ./mkPkgs.nix {
     inherit overlay mkPkgsUpstream;
   };
+
+  npmBridge = self.callLib ./npm-bridge { };
 })

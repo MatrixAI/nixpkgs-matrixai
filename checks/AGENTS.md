@@ -20,6 +20,7 @@ The check entrypoint is [`checks/default.nix`](checks/default.nix), which aggreg
 - [`contract-packages`](checks/contract-packages.nix)
 - [`contract-modules`](checks/contract-modules.nix)
 - [`policy-pin`](checks/policy-pin.nix)
+- [`npm-bridge-install`](checks/npm-bridge-install.nix)
 - [`smoke-hello`](checks/smoke-hello.nix)
 
 Keep each lane semantic and independently explainable.

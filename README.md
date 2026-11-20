@@ -110,6 +110,27 @@ Projects should add `hercules-ci/gitignore.nix` as their own input only when the
 
 If a wrapper producer flake such as `nixpkgs-matrixai-private` is the only Matrix AI input pinned by a downstream repository, that wrapper must explicitly re-export this public library surface, for example by exposing `lib.gitignore` from its own `lib` output. Flake outputs do not automatically pass through transitive input outputs.
 
+### Prepared npm dependencies (`lib.npmBridge`)
+
+`lib.npmBridge` builds an npm dependency import from a consumer's manifest and
+lockfile. Registry dependencies retain their locked sources. Matrix AI Git
+dependencies selected from the lockfile use prepared producer archives and
+are checked against their locked version and metadata. The lockfile remains the
+authority for exact selections; the bridge does not update it during evaluation.
+
+```nix
+npmDependencies = nixpkgs-matrixai.lib.npmBridge.dependenciesFromRoot {
+  inherit pkgs nodejs;
+  root = ./.;
+};
+```
+
+Automatic selection currently covers scoped Matrix AI Git SSH dependencies
+resolved to 40-character commits. Other Git dependencies require explicit
+prepared selections and otherwise fail rather than silently fetching sources.
+The bridge's Git override support accepts only a restricted range syntax; it
+does not claim general npm override compatibility.
+
 ### Package registry and overlay model
 
 `pkgs/default.nix` is the package registry and projection hub:
@@ -153,6 +174,7 @@ Current checks:
 - `checks.${system}.contract-packages`
 - `checks.${system}.contract-modules`
 - `checks.${system}.policy-pin`
+- `checks.${system}.npm-bridge-install`
 - `checks.${system}.smoke-hello`
 
 ### Explore the pinned upstream nixpkgs in a REPL

@@ -35,6 +35,10 @@
     inherit pkgs;
   };
 
+  "npm-bridge-install" = import ./npm-bridge-install.nix {
+    inherit pkgs publicLib;
+  };
+
   "smoke-hello" = import ./smoke-hello.nix {
     inherit pkgs topLevelPackages legacyPackages;
   };
