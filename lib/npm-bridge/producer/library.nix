@@ -13,6 +13,7 @@
   src ? gitignore.gitignoreSource root,
   system ? pkgs.stdenv.hostPlatform.system,
   runtimeProviders ? null,
+  buildExcludeDevDependencies ? [ ],
 }:
 let
   packageFile = root + /package.json;
@@ -21,7 +22,12 @@ let
   packageLock = builtins.fromJSON (builtins.readFile packageLockFile);
   npmSources = consumer.fromLock { inherit system packageLock; };
   npmDependencies = consumer.dependencies {
-    inherit pkgs nodejs packageLock npmSources;
+    inherit
+      pkgs
+      nodejs
+      packageLock
+      npmSources
+      ;
     package = manifest;
   };
   npm = consumer.install {
@@ -31,13 +37,44 @@ let
   };
   environment = consumer.environment { inherit pkgs nodejs npmDependencies; };
   inherit (environment) installedDependencies setupDependencies;
-  builtLibrary = npmBuild { inherit pkgs nodejs src setupDependencies; };
+  buildProjection = import ../consumer/build-projection.nix {
+    lib = pkgs.lib;
+    package = manifest;
+    inherit packageLock;
+    excludeDevDependencies = buildExcludeDevDependencies;
+  };
+  buildSources = consumer.fromLock {
+    inherit system;
+    packageLock = buildProjection.packageLock;
+  };
+  buildDependencies =
+    if buildExcludeDevDependencies == [ ] then
+      npmDependencies
+    else
+      consumer.dependencies {
+        inherit pkgs nodejs;
+        inherit (buildProjection) package packageLock;
+        npmSources = buildSources;
+      };
+  buildEnvironment =
+    if buildExcludeDevDependencies == [ ] then
+      environment
+    else
+      consumer.environment {
+        inherit pkgs nodejs;
+        npmDependencies = buildDependencies;
+      };
+  builtLibrary = npmBuild {
+    inherit pkgs nodejs src;
+    setupDependencies = buildEnvironment.setupDependencies;
+  };
   selectedRuntimeProviders =
     if runtimeProviders != null then
       runtimeProviders
     else
       map
-        (modulePath:
+        (
+          modulePath:
           let
             selected = npmSources.${modulePath};
           in
@@ -46,15 +83,13 @@ let
             version = selected.archive.npmPackage.version;
             source = selected.source;
             archiveOutput = selected.output;
-          })
-        (builtins.filter
-          (modulePath:
-            let
-              selected = npmSources.${modulePath};
-            in
-            modulePath == "node_modules/${selected.name}"
-            && builtins.hasAttr selected.name (manifest.dependencies or { }))
-          (builtins.attrNames npmSources));
+          }
+        )
+        (
+          builtins.filter (modulePath: builtins.hasAttr modulePath npmSources) (
+            map (name: "node_modules/${name}") (builtins.attrNames (manifest.dependencies or { }))
+          )
+        );
   npmPackage = libraryPackage {
     inherit
       pkgs
@@ -62,8 +97,8 @@ let
       src
       packageFile
       packageLockFile
-      npmDependencies
       ;
+    npmDependencies = buildDependencies;
     package = manifest;
     npmBuild = builtLibrary;
     sourceProvenance = sourceProvenance self;

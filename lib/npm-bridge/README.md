@@ -74,6 +74,26 @@ dependencies. It expects a `package.json`, a `package-lock.json`, an
 `npm run build` command, and a build that produces `dist`. Other package shapes
 need their own composition or the lower-level helpers.
 
+When a development dependency is used only by tests and is not needed by the
+build, a producer may opt out of evaluating it for the build:
+
+```nix
+buildExcludeDevDependencies = [ "@matrixai/async-init" ];
+```
+
+Put this attribute inside the `libraryFromRoot` arguments. This is an explicit
+assertion by the producer: excluding a dependency needed by the build can make
+the build fail. The build projection retains dependencies reachable through
+other retained entries. It requires a version 3 lockfile and rejects unsupported
+workspace links, bundled dependency graphs, unresolved required edges, and names
+that are not development-only dependencies. The full lockfile remains the
+authority for development installs and checks; those paths may still evaluate
+the excluded producer graph.
+
+For packages without bundled dependencies, archiving uses the built `dist`
+without reinstalling dependencies. Packages declaring bundled dependencies use
+the dependency-installing archive path instead.
+
 To make explicit development installs use the prepared archives, put
 `npmLibrary.npm` on the development shell's path with higher priority than the
 normal npm. For example, in an integrated devenv shell:
