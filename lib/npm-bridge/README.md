@@ -256,6 +256,79 @@ override cases are rejected rather than treated as general npm support.
 
 Then follow [install after a refresh](#install-after-a-refresh).
 
+### Multi-repository upgrade example
+
+This is the tested contexts, cancellable, and timer flow. Versions in this
+example are release snapshots, not a request to change every repository:
+
+```text
+Before: timer -> contexts 4.1.1
+              -> cancellable 4.2.1 -> contexts 4.1.1
+
+After:  timer -> contexts 4.1.2
+              -> cancellable 4.2.1 -> contexts 4.1.2
+```
+
+1. Release the upstream contexts commit and matching 4.1.2 tag. Its flake must
+   export the prepared archive and descriptors described in the
+   [producer contract](#producer-contract).
+2. Leave cancellable at its existing 4.2.1 commit. Its manifest requests
+   contexts `#semver:^4.1.1`, which permits 4.1.2. Do not edit, release, or
+   repin cancellable just to select the newer contexts in timer.
+3. In timer, update the direct contexts requirement and its root override to the
+   same `#semver:^4.1.2` Git URL. The root override also covers other transitive
+   dependencies that still pin an older contexts tag. An override is not
+   inherently required for a compatible range; use one only when the consumer
+   needs to override a transitive constraint.
+
+   The relevant timer manifest entries after the update are:
+
+   ```json
+   {
+     "dependencies": {
+       "@matrixai/async-cancellable": "git+ssh://git@github.com/MatrixAI/js-async-cancellable.git#semver:^4.2.1",
+       "@matrixai/contexts": "git+ssh://git@github.com/MatrixAI/js-contexts.git#semver:^4.1.2"
+     },
+     "overrides": {
+       "@matrixai/contexts": "git+ssh://git@github.com/MatrixAI/js-contexts.git#semver:^4.1.2"
+     }
+   }
+   ```
+
+4. Refresh the timer lock with `npm install --package-lock-only`, review the
+   exact selections, reload the shell, and run `npm ci`. Run the consumer's
+   existing tests and build its archive with `nix build '.#npm-package'`.
+
+In the tested lock, cancellable remained at commit
+`c9732996021d954b2edd0b4efbc3ff9853848292`; contexts changed from
+`eae75309123044958fdb1d310b98b47b2ef27c45` to
+`0387fa6eb5842ba6854b614bb605bbfae9816011`. The actual bridge-generated install
+had one contexts instance, and resolution from both timer and cancellable
+reached the same 4.1.2 module. Canonical manifest and lock bytes were restored;
+timer's package, unit, lint, and browser checks passed. This was a particular
+integration, not a retained bridge check or a guarantee for every dependency
+graph.
+
+Verify the resolved instance from each consumer after installation:
+
+```sh
+node --input-type=module -e '
+import { createRequire } from "node:module";
+const timer = createRequire(`${process.cwd()}/package.json`);
+const cancellable = createRequire(timer.resolve("@matrixai/async-cancellable/package.json"));
+console.log("timer:", timer.resolve("@matrixai/contexts/package.json"));
+console.log("cancellable:", cancellable.resolve("@matrixai/contexts/package.json"));
+'
+```
+
+Matching paths show those two consumers resolve the same installed package;
+check its version and the lockfile as well. npm's lock remains authoritative:
+other graph shapes can contain distinct nested instances, and compatible ranges
+do not by themselves prove behavioral compatibility. The intermediate producer
+may build its own archive using its own locked build dependencies. A downstream
+runtime selection does not rewrite that producer's lock or rebuild its archive
+against the newer version.
+
 ### Install after a refresh
 
 Review all lockfile changes, including any unrelated resolutions. Let direnv
