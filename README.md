@@ -112,24 +112,49 @@ If a wrapper producer flake such as `nixpkgs-matrixai-private` is the only Matri
 
 ### Prepared npm dependencies (`lib.npmBridge`)
 
-`lib.npmBridge` builds an npm dependency import from a consumer's manifest and
-lockfile. Registry dependencies retain their locked sources. Matrix AI Git
-dependencies selected from the lockfile use prepared producer archives and
-are checked against their locked version and metadata. The lockfile remains the
-authority for exact selections; the bridge does not update it during evaluation.
+`lib.npmBridge.consumer` builds an npm dependency import from a consumer's
+manifest and lockfile. Registry dependencies retain their locked sources.
+Matrix AI Git dependencies selected from the lockfile use prepared producer
+archives and are checked against their locked version and metadata. The lockfile
+remains the authority for exact selections; the bridge does not update it during
+evaluation.
 
 ```nix
-npmDependencies = nixpkgs-matrixai.lib.npmBridge.dependenciesFromRoot {
+npmConsumer = nixpkgs-matrixai.lib.npmBridge.consumer;
+npmProducer = nixpkgs-matrixai.lib.npmBridge.producer;
+npmDependencies = npmConsumer.dependenciesFromRoot {
   inherit pkgs nodejs;
   root = ./.;
 };
+npmEnvironment = npmConsumer.environment {
+  inherit pkgs nodejs npmDependencies;
+};
+inherit (npmEnvironment) installedDependencies setupDependencies;
+sourceProvenance = npmProducer.sourceProvenance inputs.self;
 ```
+
+`lib.npmBridge.producer` supplies reusable library build and npm archive
+constructors. Its `libraryFromRoot` convenience function composes the consumer
+dependency import with a library build that runs `npm run build` and produces
+`dist`. It returns the separate `npmBuild` and `npmPackage` derivations. Its
+lower-level `npmBuild` constructor has the same build and output convention; it
+is not a generic producer for all npm packages. The composition accepts a
+Gitignore library, the flake source, and the flake's `self` metadata. Callers
+can also provide a separately filtered source and runtime provider metadata;
+otherwise direct prepared runtime dependencies are advertised from the lock.
+The lower-level constructors accept individual manifest paths and dependency
+inputs when the standard composition is unsuitable. The resulting archive does
+not bundle the dependency tree. The composition also returns the consumer npm
+wrapper so a development shell can put it ahead of the ordinary npm executable.
+Shell activation does not itself need to run an installation.
 
 Automatic selection currently covers scoped Matrix AI Git SSH dependencies
 resolved to 40-character commits. Other Git dependencies require explicit
 prepared selections and otherwise fail rather than silently fetching sources.
 The bridge's Git override support accepts only a restricted range syntax; it
 does not claim general npm override compatibility.
+See the [bridge documentation](lib/npm-bridge/README.md) for diagrams and the
+steps for adding and upgrading direct and transitive dependencies.
 
 ### Package registry and overlay model
 
@@ -174,7 +199,6 @@ Current checks:
 - `checks.${system}.contract-packages`
 - `checks.${system}.contract-modules`
 - `checks.${system}.policy-pin`
-- `checks.${system}.npm-bridge-install`
 - `checks.${system}.smoke-hello`
 
 ### Explore the pinned upstream nixpkgs in a REPL

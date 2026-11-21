@@ -1,6 +1,6 @@
 { }:
 let
-  sources = import ./sources.nix;
+  sources = import ./consumer/sources.nix;
   selectionsFromLock =
     {
       packageLock,
@@ -25,16 +25,33 @@ let
       inherit system packageLock;
       selections = (selectionsFromLock { inherit packageLock include; }) // selections;
     };
-  dependencies = import ./dependencies.nix;
+  dependencies = import ./consumer/dependencies.nix;
+  consumer = {
+    inherit sources selectionsFromLock fromLock dependencies;
+    dependenciesFromRoot = { pkgs, nodejs, root, system ? pkgs.stdenv.hostPlatform.system }:
+      let
+        package = builtins.fromJSON (builtins.readFile (root + /package.json));
+        packageLock = builtins.fromJSON (builtins.readFile (root + /package-lock.json));
+        npmSources = fromLock { inherit system packageLock; };
+      in
+      dependencies { inherit pkgs nodejs package packageLock npmSources; };
+    environment = import ./consumer/environment.nix;
+    install = import ./consumer/install.nix;
+  };
+  producer = rec {
+    npmBuild = import ./producer/build.nix;
+    libraryPackage = import ./producer/package.nix;
+    sourceProvenance = self: {
+      rev = if self ? dirtyRev then null else self.rev or null;
+      dirtyRev = self.dirtyRev or null;
+      narHash = self.narHash or null;
+      dirty = if self ? dirtyRev then true else if self ? rev then false else null;
+    };
+    libraryFromRoot = import ./producer/library.nix {
+      inherit consumer npmBuild libraryPackage sourceProvenance;
+    };
+  };
 in
 {
-  inherit sources selectionsFromLock fromLock dependencies;
-  dependenciesFromRoot = { pkgs, nodejs, root, system ? pkgs.stdenv.hostPlatform.system }:
-    let
-      package = builtins.fromJSON (builtins.readFile (root + /package.json));
-      packageLock = builtins.fromJSON (builtins.readFile (root + /package-lock.json));
-      npmSources = fromLock { inherit system packageLock; };
-    in
-    dependencies { inherit pkgs nodejs package packageLock npmSources; };
-  install = import ./install.nix;
+  inherit consumer producer;
 }
