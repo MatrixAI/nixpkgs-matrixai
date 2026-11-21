@@ -136,6 +136,20 @@ policies. Producer-flake evaluation cost is separate from source filtering.
 
 ## Development installation
 
+Hermetic Nix builds use the dependency importer directly: Nix selects the locked
+sources and supplies prepared archives to the npm build environment. npm remains
+the authority for dependency resolution; it does not need to understand Nix.
+
+The development shell has a different boundary. Its npm wrapper consumes a
+Nix-generated plan and temporarily substitutes the prepared archives for selected
+Git dependencies before invoking npm. This preserves ordinary npm commands and
+canonical Git references without requiring an npm-compatible registry or a
+separate generated manifest and lockfile workflow. A Nix-provided dependency
+tree is another possible workflow, but does not provide the same explicit npm
+install experience. These are alternatives, not impossibilities: the wrapper is
+chosen for this development workflow, at the cost of temporary rewrites and
+recovery handling. It does not make npm evaluate Nix.
+
 ```mermaid
 flowchart LR
   Edit[Edit manifest or select update] --> Refresh[Explicit lock refresh]
